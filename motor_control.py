@@ -36,42 +36,42 @@ strip = None
 def go_left_fwd(duty):
   left_rev.stop()
   left_fwd.start(duty)
-  for x in range(0,LED_COUNT/2):
+  for x in range(LED_COUNT/2,LED_COUNT):
     strip.setPixelColor(x,Color(0,255,0)) #green
   strip.show() 
 
 def go_left_rev(duty):
   left_fwd.stop()
   left_rev.start(duty)
-  for x in range(0,LED_COUNT/2):
+  for x in range(LED_COUNT/2,LED_COUNT):
     strip.setPixelColor(x,Color(255,0,0)) #red
   strip.show() 
 
 def go_left_stop():
   left_rev.stop()
   left_fwd.stop()
-  for x in range(0,LED_COUNT/2):
+  for x in range(LED_COUNT/2,LED_COUNT):
     strip.setPixelColor(x,Color(0,0,255)) #blue
   strip.show()
 
 def go_right_fwd(duty):
   right_rev.stop()
   right_fwd.start(duty)
-  for x in range(LED_COUNT/2,LED_COUNT):
+  for x in range(LED_COUNT/2):
     strip.setPixelColor(x,Color(0,255,0)) #green
   strip.show() 
 
 def go_right_rev(duty):
   right_fwd.stop()
   right_rev.start(duty)
-  for x in range(LED_COUNT/2,LED_COUNT):
+  for x in range(LED_COUNT/2):
     strip.setPixelColor(x,Color(255,0,0)) #red
   strip.show() 
 
 def go_right_stop():
   right_rev.stop()
   right_fwd.stop()
-  for x in range(LED_COUNT/2,LED_COUNT):
+  for x in range(LED_COUNT/2):
     strip.setPixelColor(x,Color(0,0,255)) #blue
   strip.show()
 
