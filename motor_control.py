@@ -13,10 +13,11 @@ LED_FREQ_HZ	= 800000  # LED frequency (800Khz)
 LED_DMA		= 5	  # DMA channel
 LED_BRIGHTNESS	= 15	  # Can go up to 255, but it's good to keep power usage low
 LED_INVERT	= False	  # I believe this is for ws2811's
+DEBOUNCE_TIME   = 300     # Debounce threshold in ms
  
 GPIO.setmode(GPIO.BOARD)
 
-HZ = 100
+HZ = 50
 UDP_IP = "0.0.0.0"
 UDP_PORT = 5005
 BUFFER_SIZE = 512
@@ -26,21 +27,32 @@ Motor1A = 16
 Motor1B = 18
 Motor2A = 23
 Motor2B = 21
+TopButton = 29
+LeftHand = 31
+RightHand = 33
+Bumper = 35
 
 left_fwd = None
 left_rev = None
 right_fwd = None
 right_rev = None
 strip = None
+bump_stop_left = False
+bump_stop_right = False
 
 def go_left_fwd(duty):
   left_rev.stop()
+  if bump_stop_left:
+    left_fwd.stop()
+    return
   left_fwd.start(duty)
   for x in range(LED_COUNT/2,LED_COUNT):
     strip.setPixelColor(x,Color(0,255,0)) #green
   strip.show() 
 
 def go_left_rev(duty):
+  global bump_stop_left
+  bump_stop_left = False
   left_fwd.stop()
   left_rev.start(duty)
   for x in range(LED_COUNT/2,LED_COUNT):
@@ -56,12 +68,17 @@ def go_left_stop():
 
 def go_right_fwd(duty):
   right_rev.stop()
+  if bump_stop_right:
+    right_fwd.stop()
+    return
   right_fwd.start(duty)
   for x in range(LED_COUNT/2):
     strip.setPixelColor(x,Color(0,255,0)) #green
   strip.show() 
 
 def go_right_rev(duty):
+  global bump_stop_right
+  bump_stop_right = False
   right_fwd.stop()
   right_rev.start(duty)
   for x in range(LED_COUNT/2):
@@ -75,6 +92,16 @@ def go_right_stop():
     strip.setPixelColor(x,Color(0,0,255)) #blue
   strip.show()
 
+def bumper_pressed_callback(channel):
+  print "bumper pressed"
+  global bump_stop_left
+  global bump_stop_right
+  bump_stop_left = True
+  bump_stop_right = True
+  for x in range(LED_COUNT):
+    strip.setPixelColor(x,Color(255,0,255)) #purple
+  strip.show()
+
 if __name__ == '__main__':
   try: 
 
@@ -82,7 +109,13 @@ if __name__ == '__main__':
     GPIO.setup(Motor1B,GPIO.OUT)
     GPIO.setup(Motor2A,GPIO.OUT)
     GPIO.setup(Motor2B,GPIO.OUT)
+    GPIO.setup(TopButton, GPIO.IN, pull_up_down=GPIO.PUD_UP) 
+    GPIO.setup(LeftHand, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    GPIO.setup(RightHand, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    GPIO.setup(Bumper, GPIO.IN, pull_up_down=GPIO.PUD_UP) 
 
+    GPIO.add_event_detect(Bumper, GPIO.FALLING, callback=bumper_pressed_callback, bouncetime=DEBOUNCE_TIME) 
+    
     left_fwd = GPIO.PWM(Motor1B, HZ)
     left_rev = GPIO.PWM(Motor1A, HZ)
     right_fwd = GPIO.PWM(Motor2A, HZ)
