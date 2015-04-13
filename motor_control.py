@@ -1,166 +1,212 @@
 #!/usr/bin/python
 
-import socket, struct
+import socket, struct, time
 import RPi.GPIO as GPIO
-from time import sleep
 from neopixel import *
+from resources.remote_control import RemoteControl
+from resources.bump_and_go import BumpAndGo
+from resources.lighting_effects import LightingEffects
 
-# configure LED's:
+class RobieRover(object):
 
-LED_COUNT 	= 14 	  # 2 x 7 NeoPixel Jewels
-LED_PIN		= 18	  # Hardware PCM pin (Pin 12, GPIO18) 
-LED_FREQ_HZ	= 800000  # LED frequency (800Khz)
-LED_DMA		= 5	  # DMA channel
-LED_BRIGHTNESS	= 15	  # Can go up to 255, but it's good to keep power usage low
-LED_INVERT	= False	  # I believe this is for ws2811's
-DEBOUNCE_TIME   = 300     # Debounce threshold in ms
- 
-GPIO.setmode(GPIO.BOARD)
+  def __init__(self):
 
-HZ = 50
-UDP_IP = "0.0.0.0"
-UDP_PORT = 5005
-BUFFER_SIZE = 512
-
-# set up our GPIO pins
-Motor1A = 16
-Motor1B = 18
-Motor2A = 23
-Motor2B = 21
-TopButton = 29
-LeftHand = 31
-RightHand = 33
-Bumper = 35
-
-left_fwd = None
-left_rev = None
-right_fwd = None
-right_rev = None
-strip = None
-bump_stop_left = False
-bump_stop_right = False
-
-def go_left_fwd(duty):
-  left_rev.stop()
-  if bump_stop_left:
-    left_fwd.stop()
-    return
-  left_fwd.start(duty)
-  for x in range(LED_COUNT/2,LED_COUNT):
-    strip.setPixelColor(x,Color(0,255,0)) #green
-  strip.show() 
-
-def go_left_rev(duty):
-  global bump_stop_left
-  bump_stop_left = False
-  left_fwd.stop()
-  left_rev.start(duty)
-  for x in range(LED_COUNT/2,LED_COUNT):
-    strip.setPixelColor(x,Color(255,0,0)) #red
-  strip.show() 
-
-def go_left_stop():
-  left_rev.stop()
-  left_fwd.stop()
-  for x in range(LED_COUNT/2,LED_COUNT):
-    strip.setPixelColor(x,Color(0,0,255)) #blue
-  strip.show()
-
-def go_right_fwd(duty):
-  right_rev.stop()
-  if bump_stop_right:
-    right_fwd.stop()
-    return
-  right_fwd.start(duty)
-  for x in range(LED_COUNT/2):
-    strip.setPixelColor(x,Color(0,255,0)) #green
-  strip.show() 
-
-def go_right_rev(duty):
-  global bump_stop_right
-  bump_stop_right = False
-  right_fwd.stop()
-  right_rev.start(duty)
-  for x in range(LED_COUNT/2):
-    strip.setPixelColor(x,Color(255,0,0)) #red
-  strip.show() 
-
-def go_right_stop():
-  right_rev.stop()
-  right_fwd.stop()
-  for x in range(LED_COUNT/2):
-    strip.setPixelColor(x,Color(0,0,255)) #blue
-  strip.show()
-
-def bumper_pressed_callback(channel):
-  print "bumper pressed"
-  global bump_stop_left
-  global bump_stop_right
-  bump_stop_left = True
-  bump_stop_right = True
-  for x in range(LED_COUNT):
-    strip.setPixelColor(x,Color(255,0,255)) #purple
-  strip.show()
-
-if __name__ == '__main__':
-  try: 
-
-    GPIO.setup(Motor1A,GPIO.OUT)
-    GPIO.setup(Motor1B,GPIO.OUT)
-    GPIO.setup(Motor2A,GPIO.OUT)
-    GPIO.setup(Motor2B,GPIO.OUT)
-    GPIO.setup(TopButton, GPIO.IN, pull_up_down=GPIO.PUD_UP) 
-    GPIO.setup(LeftHand, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-    GPIO.setup(RightHand, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-    GPIO.setup(Bumper, GPIO.IN, pull_up_down=GPIO.PUD_UP) 
-
-    GPIO.add_event_detect(Bumper, GPIO.FALLING, callback=bumper_pressed_callback, bouncetime=DEBOUNCE_TIME) 
+    # configure LED's:
+    self.LED_COUNT 		= 14 	  # 2 x 7 NeoPixel Jewels
+    self.LED_PIN		= 18	  # Hardware PCM pin (Pin 12, GPIO18) 
+    self.LED_FREQ_HZ		= 800000  # LED frequency (800Khz)
+    self.LED_DMA		= 5	  # DMA channel
+    self.LED_BRIGHTNESS		= 15	  # Can go up to 255, but it's good to keep power usage low
+    self.LED_INVERT		= False	  # I believe this is for ws2811's
     
-    left_fwd = GPIO.PWM(Motor1B, HZ)
-    left_rev = GPIO.PWM(Motor1A, HZ)
-    right_fwd = GPIO.PWM(Motor2A, HZ)
-    right_rev = GPIO.PWM(Motor2B, HZ)
+    # configure UDP server:
+    self.UDP_IP 		= "0.0.0.0"
+    self.UDP_PORT 		= 5005
+    self.BUFFER_SIZE 		= 512
 
-    strip = Adafruit_NeoPixel(LED_COUNT, LED_PIN, LED_FREQ_HZ, LED_DMA, LED_INVERT, LED_BRIGHTNESS)
-    strip.begin()
+    # set up our GPIO:
+    self.Motor1A 		= 16
+    self.Motor1B 		= 18
+    self.Motor2A 		= 23
+    self.Motor2B 		= 21
+    self.TopButton 		= 29
+    self.LeftHand 		= 31
+    self.RightHand 		= 33
+    self.Bumper 		= 35
+    self.HZ			= 100 
+    self.DEBOUNCE_TIME		= 300   # Debounce threshold in ms
+    self.PING_TRIGGER		= 11	# Ping sensor trigger pin 
+    self.PING_ECHO		= 7	# Ping sensor echo pin
+    self.PING_BUFFER_SIZE 	= 15	# How many distance measurements to average against
 
-    sock = socket.socket(socket.AF_INET, # Internet
-                 socket.SOCK_DGRAM) # UDP
-    sock.bind((UDP_IP, UDP_PORT))
+    # set up some instance variables:
+    self.left_fwd 		= None
+    self.left_rev 		= None
+    self.right_fwd 		= None
+    self.right_rev 		= None
+    self.strip 			= None
+    self.mode_changed		= False
+
+    # do GPIO configuration:
+    GPIO.setmode(GPIO.BOARD)
+    GPIO.setup(self.PING_TRIGGER,GPIO.OUT)
+    GPIO.setup(self.PING_ECHO,GPIO.IN)
+    GPIO.output(self.PING_TRIGGER, False)
+    GPIO.setup(self.Motor1A,GPIO.OUT)
+    GPIO.setup(self.Motor1B,GPIO.OUT)
+    GPIO.setup(self.Motor2A,GPIO.OUT)
+    GPIO.setup(self.Motor2B,GPIO.OUT)
+    GPIO.setup(self.TopButton, GPIO.IN, pull_up_down=GPIO.PUD_UP) 
+    GPIO.setup(self.LeftHand, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    GPIO.setup(self.RightHand, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    GPIO.setup(self.Bumper, GPIO.IN, pull_up_down=GPIO.PUD_UP) 
+    self.left_fwd = GPIO.PWM(self.Motor1B, self.HZ)
+    self.left_rev = GPIO.PWM(self.Motor1A, self.HZ)
+    self.right_fwd = GPIO.PWM(self.Motor2A, self.HZ)
+    self.right_rev = GPIO.PWM(self.Motor2B, self.HZ)
+
+    self.currentMode = 0
+    self.modeClass = None
+
+    # ensure we start in stopped state:
+    self.turnOffMotors()
+
+  def turnOffMotors(self):
+    self.right_fwd.stop()
+    self.right_rev.stop()
+    self.left_fwd.stop()
+    self.left_rev.stop()
+
+  """ modes:
+      0 = remote control
+      1 = bump-n-go
+      2 = lighting effects
+  """
+  def doModeSwitch(self, pin, mode = None):
+    if mode == None:
+      mode = self.currentMode + 1
+    if mode > 2:
+      mode = 0
+    if mode != self.currentMode:
+      self.modeClass.cleanup()
+      self.currentMode = mode
+      self.mode_changed = True
+    print "Selected mode: %s" % mode
+    self.blankLEDs()
+    if mode == 1:
+      self._showPixels([2,0,5,9,7,12],Color(255,102,0))
+      self.modeClass = BumpAndGo(self)
+    elif mode == 2:
+      self._showPixels([3,0,6,10,7,13],Color(255,255,0))
+      self.modeClass = LightingEffects(self)
+    else: # assume mode 0
+      self._showPixels([1,0,4,8,7,11],Color(255,0,0))
+      self.modeClass = RemoteControl(self) 
+
+  def _showPixels(self, pixels, color):
+    for p in pixels:
+      self.strip.setPixelColor(p,color)
+    self.strip.show() 
+    
+  def bumperPressed(self, pin):
+    print "Bumper pressed"
+    try:
+      self.modeClass.bumperPressed()
+    except Exception, e:
+      print "Bumper exception: %s" % e
+
+  def leftHandPressed(self, pin):
+    print "Left hand pressed"
+    try:
+      self.modeClass.leftHandPressed()
+    except Exception, e:
+      print "Left hand exception: %s" % e
+
+  def rightHandPressed(self, pin):
+    print "Right hand pressed"
+    try:
+      self.modeClass.rightHandPressed()
+    except Exception, e:
+      print "Right hand exception: %s" % e
+
+  def echoCallback(self, pin):
+    try:
+      self.modeClass.echoCallback(pin, GPIO.input(pin))
+    except Exception, e:
+      print "Echo exception: %s" % e
+
+  def motorControl(self, left, right):
+    try:
+      self.modeClass.motorControl(left, right)
+    except Exception, e:
+      print "Motor exception: %s" % e
+
+  def loopHook(self):
+    try:
+      self.modeClass.loopHook()
+    except Exception, e:
+      print "Loop hook exception: %s" % e
+
+  def _doPing(self):
+    GPIO.output(self.PING_TRIGGER, True)
+    time.sleep(0.00001)
+    GPIO.output(self.PING_TRIGGER, False)
+
+  def doMainLoop(self):
+    self.strip = Adafruit_NeoPixel(self.LED_COUNT, self.LED_PIN,
+      self.LED_FREQ_HZ, self.LED_DMA, self.LED_INVERT, self.LED_BRIGHTNESS)
+    self.strip.begin()
+    self.modeClass = RemoteControl(self)
+    GPIO.add_event_detect(self.PING_ECHO, GPIO.BOTH, callback=self.echoCallback)
+    GPIO.add_event_detect(self.TopButton, GPIO.FALLING,
+      callback=self.doModeSwitch, bouncetime=self.DEBOUNCE_TIME)
+    GPIO.add_event_detect(self.Bumper, GPIO.FALLING,
+      callback=self.bumperPressed, bouncetime=self.DEBOUNCE_TIME)
+    GPIO.add_event_detect(self.LeftHand, GPIO.FALLING,
+      callback=self.leftHandPressed, bouncetime=self.DEBOUNCE_TIME)
+    GPIO.add_event_detect(self.RightHand, GPIO.FALLING,
+      callback=self.rightHandPressed, bouncetime=self.DEBOUNCE_TIME)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setblocking(0)
+    sock.bind((self.UDP_IP, self.UDP_PORT))
 
     print "Rover initialized. Ctl-c to exit/stop.\n"
 
     while True:
-      data, addr = sock.recvfrom(512) # buffer size is 512 bytes
-      # unpack our raw data:
-      check_byte = struct.unpack("b", data[0])[0]
-      if check_byte == 1:
-        left_wheel = struct.unpack("b", data[1])[0]
-        right_wheel = struct.unpack("b", data[2])[0]
-        print "left wheel:%s right wheel:%s" % (left_wheel, right_wheel)
-        if left_wheel < 0:
-          go_left_rev(0 - left_wheel)
-        elif left_wheel > 0:
-          go_left_fwd(left_wheel)
-        else:
-          go_left_stop()
-        if right_wheel < 0:
-          go_right_rev(0 - right_wheel)
-        elif right_wheel > 0:
-          go_right_fwd(right_wheel)
-        else:
-          go_right_stop()
-      sleep(0.02)
+      # fire off a ping:
+      self._doPing()
+      time.sleep(0.005) # allow callbacks to process
+      try: 
+        # acquire UDP data:
+        data, addr = sock.recvfrom(self.BUFFER_SIZE)
+        check_byte = struct.unpack("b", data[0])[0]
+        if check_byte == 1:
+          left_wheel = struct.unpack("b", data[1])[0]
+          right_wheel = struct.unpack("b", data[2])[0]
+          self.motorControl(left_wheel,right_wheel)
+      except Exception,e:
+        #print "Main loop exception: %s" % e
+        pass
+      self.loopHook()
+      if self.mode_changed:
+        self.turnOffMotors() 
+        self.mode_changed = False
+
+  # Make the LEDs go dark:
+  def blankLEDs(self):
+    self._showPixels(range(self.LED_COUNT),Color(0,0,0))
+
+  def cleanup(self):
+    self.modeClass.cleanup()
+    GPIO.cleanup()
+    self.blankLEDs()
+    print "\nRover stopped."
+      
+if __name__ == '__main__':
+  try:
+    rr = RobieRover()
+    rr.doMainLoop()
   except Exception, e:
     print "Exception: %s" % e
   finally:
-    left_fwd.stop()
-    right_fwd.stop()
-    left_rev.stop()
-    right_rev.stop()
-    for x in range(LED_COUNT):
-      strip.setPixelColor(x, Color(0,0,0))
-      strip.show()
-    GPIO.cleanup()
-    print "\nRover stopped."
- 
+    rr.cleanup()
