@@ -4,7 +4,7 @@ class ModePluginAbstract(object):
   __metaclass__ = ABCMeta
 
   @abstractmethod
-  def __init__(self, led_strip, left_fwd, left_rev, right_fwd, right_rev):
+  def __init__(self, parent):
     pass
 
   @abstractmethod
@@ -25,6 +25,10 @@ class ModePluginAbstract(object):
 
   @abstractmethod
   def echoCallback(self, pin, value):
+    pass
+
+  @abstractmethod
+  def loopHook(self):
     pass
 
   @abstractmethod

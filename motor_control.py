@@ -33,7 +33,7 @@ class RobieRover(object):
     self.LeftHand 		= 31
     self.RightHand 		= 33
     self.Bumper 		= 35
-    self.HZ			= 50
+    self.HZ			= 100 
     self.DEBOUNCE_TIME		= 300   # Debounce threshold in ms
     self.PING_TRIGGER		= 11	# Ping sensor trigger pin 
     self.PING_ECHO		= 7	# Ping sensor echo pin
@@ -45,7 +45,7 @@ class RobieRover(object):
     self.right_fwd 		= None
     self.right_rev 		= None
     self.strip 			= None
-    self.lockthread		= False
+    self.mode_changed		= False
 
     # do GPIO configuration:
     GPIO.setmode(GPIO.BOARD)
@@ -68,15 +68,21 @@ class RobieRover(object):
     self.currentMode = 0
     self.modeClass = None
 
+    # ensure we start in stopped state:
+    self.turnOffMotors()
+
+  def turnOffMotors(self):
+    self.right_fwd.stop()
+    self.right_rev.stop()
+    self.left_fwd.stop()
+    self.left_rev.stop()
+
   """ modes:
       0 = remote control
       1 = bump-n-go
       2 = lighting effects
   """
   def doModeSwitch(self, pin, mode = None):
-    if self.lockthread == True:
-      return
-    self.lockthread = True
     if mode == None:
       mode = self.currentMode + 1
     if mode > 2:
@@ -84,18 +90,18 @@ class RobieRover(object):
     if mode != self.currentMode:
       self.modeClass.cleanup()
       self.currentMode = mode
+      self.mode_changed = True
     print "Selected mode: %s" % mode
     self.blankLEDs()
     if mode == 1:
       self._showPixels([2,0,5,9,7,12],Color(255,102,0))
-      self.modeClass = BumpAndGo(self.strip, self.left_fwd, self.left_rev, self.right_fwd, self.right_rev)
+      self.modeClass = BumpAndGo(self)
     elif mode == 2:
       self._showPixels([3,0,6,10,7,13],Color(255,255,0))
-      self.modeClass = LightingEffects(self.strip, self.left_fwd, self.left_rev, self.right_fwd, self.right_rev)
+      self.modeClass = LightingEffects(self)
     else: # assume mode 0
       self._showPixels([1,0,4,8,7,11],Color(255,0,0))
-      self.modeClass = RemoteControl(self.strip, self.left_fwd, self.left_rev, self.right_fwd, self.right_rev) 
-    self.lockthread = False
+      self.modeClass = RemoteControl(self) 
 
   def _showPixels(self, pixels, color):
     for p in pixels:
@@ -103,47 +109,31 @@ class RobieRover(object):
     self.strip.show() 
     
   def bumperPressed(self, pin):
-    if self.lockthread == True:
-      return
-    self.lockthread = True
     print "Bumper pressed"
     try:
       self.modeClass.bumperPressed()
     except Exception, e:
       print "Bumper exception: %s" % e
-    self.lockthread = False
 
   def leftHandPressed(self, pin):
-    if self.lockthread == True:
-      return
-    self.lockthread = True
     print "Left hand pressed"
     try:
       self.modeClass.leftHandPressed()
     except Exception, e:
       print "Left hand exception: %s" % e
-    self.lockthread = False
 
   def rightHandPressed(self, pin):
-    if self.lockthread == True:
-      return
-    self.lockthread = True
     print "Right hand pressed"
     try:
       self.modeClass.rightHandPressed()
     except Exception, e:
       print "Right hand exception: %s" % e
-    self.lockthread = False
 
   def echoCallback(self, pin):
-    if self.lockthread == True:
-      return
-    self.lockthread = True
     try:
       self.modeClass.echoCallback(pin, GPIO.input(pin))
     except Exception, e:
       print "Echo exception: %s" % e
-    self.lockthread = False
 
   def motorControl(self, left, right):
     try:
@@ -151,11 +141,22 @@ class RobieRover(object):
     except Exception, e:
       print "Motor exception: %s" % e
 
+  def loopHook(self):
+    try:
+      self.modeClass.loopHook()
+    except Exception, e:
+      print "Loop hook exception: %s" % e
+
+  def _doPing(self):
+    GPIO.output(self.PING_TRIGGER, True)
+    time.sleep(0.00001)
+    GPIO.output(self.PING_TRIGGER, False)
+
   def doMainLoop(self):
     self.strip = Adafruit_NeoPixel(self.LED_COUNT, self.LED_PIN,
       self.LED_FREQ_HZ, self.LED_DMA, self.LED_INVERT, self.LED_BRIGHTNESS)
     self.strip.begin()
-    self.modeClass = RemoteControl(self.strip, self.left_fwd, self.left_rev, self.right_fwd, self.right_rev)
+    self.modeClass = RemoteControl(self)
     GPIO.add_event_detect(self.PING_ECHO, GPIO.BOTH, callback=self.echoCallback)
     GPIO.add_event_detect(self.TopButton, GPIO.FALLING,
       callback=self.doModeSwitch, bouncetime=self.DEBOUNCE_TIME)
@@ -173,11 +174,8 @@ class RobieRover(object):
 
     while True:
       # fire off a ping:
-      GPIO.output(self.PING_TRIGGER, True)
-      time.sleep(0.00001)
-      GPIO.output(self.PING_TRIGGER, False)
-      time.sleep(0.05) # allow callbacks to process
-      
+      self._doPing()
+      time.sleep(0.005) # allow callbacks to process
       try: 
         # acquire UDP data:
         data, addr = sock.recvfrom(self.BUFFER_SIZE)
@@ -189,7 +187,10 @@ class RobieRover(object):
       except Exception,e:
         #print "Main loop exception: %s" % e
         pass
-
+      self.loopHook()
+      if self.mode_changed:
+        self.turnOffMotors() 
+        self.mode_changed = False
 
   # Make the LEDs go dark:
   def blankLEDs(self):

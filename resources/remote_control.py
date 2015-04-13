@@ -3,15 +3,15 @@ from resources.mode_plugin_abstract import ModePluginAbstract
 from neopixel import Color
 
 class RemoteControl(ModePluginAbstract):
-  def __init__(self, led_strip, left_fwd, left_rev, right_fwd, right_rev):
-    self.strip = led_strip
-    self.left_fwd = left_fwd
-    self.left_rev = left_rev
-    self.right_fwd = right_fwd
-    self.right_rev = right_rev
+  def __init__(self, parent):
+    self.strip = parent.strip
+    self.left_fwd = parent.left_fwd
+    self.left_rev = parent.left_rev
+    self.right_fwd = parent.right_fwd
+    self.right_rev = parent.right_rev
     self.bump_stop_left = False
     self.bump_stop_right = False
-    self.led_count = led_strip.numPixels()
+    self.led_count = parent.strip.numPixels()
     self.signalon = 0
     self.signaloff = 0
     self.distance_buffer = []
@@ -113,6 +113,9 @@ class RemoteControl(ModePluginAbstract):
       self._go_right_fwd(right)
     else:
       self._go_right_stop()
+
+  def loopHook(self):
+    pass
 
   def cleanup(self):
     self.right_rev.stop()
